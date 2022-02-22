@@ -110,8 +110,8 @@ def main():
     fasta = SeqIO.to_dict(SeqIO.parse(FILE, "fasta"))
     optimized_records = []
 
-    for i in range(1,len(fasta.keys())):
-        record = fasta[list(fasta)[i-1]]
+    for i in range(0,len(fasta.keys())):
+        record = fasta[list(fasta)[i]]
         optimized = optimizeCodons(record)
         print(optimized)
         optimized_records.append(optimized)

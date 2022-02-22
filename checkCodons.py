@@ -9,8 +9,6 @@ from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
 from Bio import pairwise2
 from Bio.pairwise2 import format_alignment
-from Bio.SeqUtils.CodonUsage import CodonAdaptationIndex
-from Bio.SeqUtils import CodonUsageIndices
 
 # Arabidopsis codon usage proportions (https://www.kazusa.or.jp/codon/cgi-bin/showcodon.cgi?species=3702&aa=1&style=N)
 # Values represent fractions among synonymous codons
@@ -112,9 +110,9 @@ def main():
     rt.columns = ["AT"]
 
 
-    for i in range(1,len(original_records.keys())):
-        original_dna = original_records[list(original_records)[i-1]]
-        optimized_dna = optimized_records[list(optimized_records)[i-1]]
+    for i in range(0,len(original_records.keys())):
+        original_dna = original_records[list(original_records)[i]]
+        optimized_dna = optimized_records[list(optimized_records)[i]]
         dnaDiffs = dnachisel.biotools.annotate_differences(optimized_dna, original_dna)
         print(dnaDiffs)
 
