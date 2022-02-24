@@ -98,6 +98,13 @@ def countCodons(dna_sequence):
 
     return(tempCodonFreq)
 
+def rankCodon(amino, codon):
+    ranking = {}
+    for AT_codon in SynonymousCodons[amino]:
+        ranking[AT_codon] = AT_CodonUsage[AT_codon]
+    ranking = pd.DataFrame.from_dict(ranking, orient='index').sort_values(0, ascending=False).reset_index()
+    return(ranking.index[ranking["index"]==codon].to_list()[0] + 1)
+
 def main():
     FILE_ORIGINAL = sys.argv[1]
     FILE_OPTIMIZED = sys.argv[2]
@@ -122,12 +129,12 @@ def main():
 
         for amino in SynonymousCodons:
             topAT = [SynonymousCodons[amino][0], AT_CodonUsage[SynonymousCodons[amino][0]]]
-            topOther = [SynonymousCodons[amino][0], counts[SynonymousCodons[amino][0]]]
+            topOther = [SynonymousCodons[amino][0], counts[SynonymousCodons[amino][0]], rankCodon(amino, SynonymousCodons[amino][0]), len(SynonymousCodons[amino])]
             for codon in SynonymousCodons[amino]:
                 if topAT[1] < AT_CodonUsage[codon]:
                     topAT =  [codon, AT_CodonUsage[codon]]
                 if topOther[1] < counts[codon]:
-                    topOther = [codon, counts[codon]]
+                    topOther = [codon, counts[codon], rankCodon(amino, codon), len(SynonymousCodons[amino])]
             if topAT[0] == topOther[0]:
                 flag = ""
             else:
