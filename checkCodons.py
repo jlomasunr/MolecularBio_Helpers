@@ -120,8 +120,11 @@ def main():
     for i in range(0,len(original_records.keys())):
         original_dna = original_records[list(original_records)[i]]
         optimized_dna = optimized_records[list(optimized_records)[i]]
-        dnaDiffs = dnachisel.biotools.annotate_differences(optimized_dna, original_dna)
-        print(dnaDiffs)
+        try:
+            dnaDiffs = dnachisel.biotools.annotate_differences(optimized_dna, original_dna)
+            print(dnaDiffs)
+        except:
+            print("No differences")
 
         #alignments = pairwise2.align.globalxx(original_dna.seq, optimized_dna.seq)
         #print(format_alignment(*alignments[0]))
