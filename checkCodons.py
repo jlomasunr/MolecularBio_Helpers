@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 
-# Usage: ./checkCodons.py [original_fasta] [optimized_fasta]
+# Usage: ./checkCodons.py -s [species] [original_fasta] [optimized_fasta]
+desc = '''
+Script to check a codon optimized fasta file against the original sequences.
+'''
 
 import sys
 import pandas as pd
@@ -9,27 +12,40 @@ from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
 from Bio import pairwise2
 from Bio.pairwise2 import format_alignment
+import argparse
+import os
+import json
 
-# Arabidopsis codon usage proportions (https://www.kazusa.or.jp/codon/cgi-bin/showcodon.cgi?species=3702&aa=1&style=N)
-# Values represent fractions among synonymous codons
-AT_CodonUsage = {
-    "TTT": 0.51,"TTC": 0.49,"TTA": 0.14,"TTG": 0.22,
-    "CTT": 0.26,"CTC": 0.17,"CTA": 0.11,"CTG": 0.11,
-    "ATT": 0.41,"ATC": 0.35,"ATA": 0.24,"ATG": 1.00,
-    "GTT": 0.40,"GTC": 0.19,"GTA": 0.15,"GTG": 0.26,
-    "TCT": 0.28,"TCC": 0.13,"TCA": 0.20,"TCG": 0.10,
-    "AGT": 0.16,"AGC": 0.13,"CCT": 0.38,"CCC": 0.11,
-    "CCA": 0.33,"CCG": 0.18,"ACT": 0.34,"ACC": 0.20,
-    "ACA": 0.31,"ACG": 0.15,"GCT": 0.43,"GCC": 0.16,
-    "GCA": 0.27,"GCG": 0.14,"TAT": 0.52,"TAC": 0.48,
-    "CAT": 0.61,"CAC": 0.39,"CAA": 0.56,"CAG": 0.44,
-    "AAT": 0.52,"AAC": 0.48,"AAA": 0.49,"AAG": 0.51,
-    "GAT": 0.68,"GAC": 0.32,"GAA": 0.52,"GAG": 0.48,
-    "GAA": 0.52,"GAG": 0.48,"TGT": 0.60,"TGC": 0.40,
-    "TGG": 1.00,"CGT": 0.17,"CGC": 0.07,"CGA": 0.12,
-    "CGG": 0.09,"AGA": 0.35,"AGG": 0.20,"GGT": 0.34,
-    "GGC": 0.14,"GGA": 0.37,"GGG": 0.16,"TAA": 0.36,
-    "TAG": 0.20,"TGA": 0.44}
+arg_parser = argparse.ArgumentParser(description=desc)
+arg_parser.add_argument('original',
+                        type=str,
+                        help='Path to original fasta file')
+arg_parser.add_argument('optimized',
+                        type=str,
+                        help='Path to optimized fasta file')
+arg_parser.add_argument('-s', 
+                        metavar="species", 
+                        type=str, 
+                        help="Species codon usage to use ['A_thaliana', 'G_max']", 
+                        default="A_thaliana", 
+                        choices=['A_thaliana', 'G_max'])
+
+args = arg_parser.parse_args()
+
+if args.s == "G_max":
+    codonUsageFile = "G_max_codonUsage.json"
+else:
+    codonUsageFile = "A_thaliana_codonUsage.json"
+
+scriptDir = os.path.realpath(__file__).replace("checkCodons.py", "")
+with open(scriptDir + codonUsageFile) as cUF:
+    codonUsageTable = json.load(cUF)
+
+codonUsage = {}
+for aa in codonUsageTable.keys():
+    for codon in codonUsageTable[aa].keys():
+        codonUsage[codon] = codonUsageTable[aa][codon]
+
 CodonsDict = {
     "TTT": 0, "TTC": 0, "TTA": 0, "TTG": 0,
     "CTT": 0, "CTC": 0, "CTA": 0, "CTG": 0,
@@ -101,19 +117,19 @@ def countCodons(dna_sequence):
 def rankCodon(amino, codon):
     ranking = {}
     for AT_codon in SynonymousCodons[amino]:
-        ranking[AT_codon] = AT_CodonUsage[AT_codon]
+        ranking[AT_codon] = codonUsage[AT_codon]
     ranking = pd.DataFrame.from_dict(ranking, orient='index').sort_values(0, ascending=False).reset_index()
     return(ranking.index[ranking["index"]==codon].to_list()[0] + 1)
 
 def main():
-    FILE_ORIGINAL = sys.argv[1]
-    FILE_OPTIMIZED = sys.argv[2]
+    FILE_ORIGINAL = args.original
+    FILE_OPTIMIZED = args.optimized
 
     original_records = SeqIO.to_dict(SeqIO.parse(FILE_ORIGINAL, "fasta"))
     optimized_records = SeqIO.to_dict(SeqIO.parse(FILE_OPTIMIZED, "fasta"))
 
-    #rt = {"AT_freq":AT_CodonUsage}
-    rt = pd.DataFrame.from_dict([AT_CodonUsage]).transpose().sort_index()
+    #rt = {"AT_freq":codonUsage}
+    rt = pd.DataFrame.from_dict([codonUsage]).transpose().sort_index()
     rt.columns = ["AT"]
 
 
@@ -131,11 +147,11 @@ def main():
         counts = countCodons(str(optimized_dna.seq))
 
         for amino in SynonymousCodons:
-            topAT = [SynonymousCodons[amino][0], AT_CodonUsage[SynonymousCodons[amino][0]]]
+            topAT = [SynonymousCodons[amino][0], codonUsage[SynonymousCodons[amino][0]]]
             topOther = [SynonymousCodons[amino][0], counts[SynonymousCodons[amino][0]], rankCodon(amino, SynonymousCodons[amino][0]), len(SynonymousCodons[amino])]
             for codon in SynonymousCodons[amino]:
-                if topAT[1] < AT_CodonUsage[codon]:
-                    topAT =  [codon, AT_CodonUsage[codon]]
+                if topAT[1] < codonUsage[codon]:
+                    topAT =  [codon, codonUsage[codon]]
                 if topOther[1] < counts[codon]:
                     topOther = [codon, counts[codon], rankCodon(amino, codon), len(SynonymousCodons[amino])]
             if topAT[0] == topOther[0]:

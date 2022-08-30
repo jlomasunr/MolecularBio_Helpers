@@ -1,143 +1,176 @@
 #!/usr/bin/env python
 
-# Usage: ./codonOptimizeSynthesis.py [fasta_file]
-# Script to codon optimize a fasta file for Arabidopsis thaliana. Codons in the
-# input file are replaced with the most frequently used Arabidopsis codons.
+desc='''
+Script to codon optimize a fasta file for Arabidopsis thaliana. The program optimizes 
+DNA sequences to balance the reduction of sequence complexity for DNA synthesis and 
+top codon usage for improved translation. Input: DNA sequences in fasta format
+'''
+
+# Improvements:
+# Print summary of non-passing constraints and their location
+# Compute sequence complexity score...?
 
 import sys
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from dnachisel import *
+import argparse
+import json
+import logging 
+import os
+from rich.logging import Console, RichHandler
+from codonUsageCalculations import calculateCAI
+from codonUsageCalculations import calculateRSCU
 
-# Arabidopsis codon usage proportions (https://www.kazusa.or.jp/codon/cgi-bin/showcodon.cgi?species=3702&aa=1&style=N)
-# Values represent fractions among synonymous codons
-AT_CodonUsage = {
-    "F":{"TTT":0.51, "TTC": 0.49},
-    "L":{"TTA": 0.14, "TTG": 0.22, "CTT": 0.26, "CTC": 0.17, "CTA": 0.11, "CTG": 0.11},
-    "S":{"TCT": 0.28, "TCC": 0.13, "TCA": 0.2, "TCG": 0.1, "AGT": 0.16, "AGC": 0.13},
-    "P":{"CCT": 0.38, "CCC": 0.11, "CCA": 0.33, "CCG": 0.18},
-    "R":{"CGT": 0.17, "CGC": 0.07, "CGA": 0.12, "CGG": 0.09, "AGA": 0.35, "AGG": 0.2},
-    "V":{"GTA": 0.15, "GTG": 0.26, "GTT": 0.4, "GTC": 0.19},
-    "T":{"ACT": 0.34, "ACC": 0.2, "ACA": 0.31, "ACG": 0.15},
-    "A":{"GCT": 0.43, "GCC": 0.16, "GCA": 0.27, "GCG": 0.14},
-    "I":{"ATT": 0.41, "ATC": 0.35, "ATA": 0.24},
-    "M":{"ATG": 1},
-    "G":{"GGG": 0.16, "GGT": 0.34, "GGC": 0.14, "GGA": 0.37},
-    "W":{"TGG": 1},
-    "C":{"TGT": 0.6, "TGC": 0.4},
-    "Y":{"TAT": 0.52, "TAC": 0.48},
-    "H":{"CAT": 0.61, "CAC": 0.39},
-    "Q":{"CAA": 0.56, "CAG": 0.44},
-    "N":{"AAT": 0.52, "AAC": 0.48},
-    "K":{"AAA": 0.49, "AAG": 0.51},
-    "D":{"GAT": 0.68, "GAC": 0.32},
-    "E":{"GAA": 0.52, "GAG": 0.48},
-    "*":{"TAA": 0.36, "TAG": 0.2, "TGA": 0.44}
-}
-# Manipulated codon usage table...
-AT_CodonUsageTop = {
-    "F":{"TTT":0.80, "TTC": 0.20},
-    "L":{"TTA": 0.1, "TTG": 0.1, "CTT": 0.50, "CTC": 0.1, "CTA": 0.1, "CTG": 0.1},
-    "S":{"TCT": 0.5, "TCC": 0.1, "TCA": 0.2, "TCG": 0.1, "AGT": 0.05, "AGC": 0.05},
-    "P":{"CCT": 0.60, "CCC": 0.1, "CCA": 0.20, "CCG": 0.1},
-    "R":{"CGT": 0.1, "CGC": 0.05, "CGA": 0.1, "CGG": 0.1, "AGA": 0.5, "AGG": 0.15},
-    "V":{"GTA": 0.1, "GTG": 0.1, "GTT": 0.6, "GTC": 0.1},
-    "T":{"ACT": 0.5, "ACC": 0.15, "ACA": 0.2, "ACG": 0.15},
-    "A":{"GCT": 0.6, "GCC": 0.1, "GCA": 0.2, "GCG": 0.1},
-    "I":{"ATT": 0.8, "ATC": 0.1, "ATA": 0.1},
-    "M":{"ATG": 1},
-    "G":{"GGG": 0.1, "GGT": 0.6, "GGC": 0.1, "GGA": 0.2},
-    "W":{"TGG": 1},
-    "C":{"TGT": 0.8, "TGC": 0.2},
-    "Y":{"TAT": 0.8, "TAC": 0.2},
-    "H":{"CAT": 0.8, "CAC": 0.2},
-    "Q":{"CAA": 0.8, "CAG": 0.2},
-    "N":{"AAT": 0.8, "AAC": 0.2},
-    "K":{"AAA": 0.8, "AAG": 0.2},
-    "D":{"GAT": 0.8, "GAC": 0.2},
-    "E":{"GAA": 0.8, "GAG": 0.2},
-    "*":{"TAA": 0.2, "TAG": 0.1, "TGA": 0.7}
-}
+logging.basicConfig(level=logging.INFO,
+        format="%(message)s",
+        datefmt="[%X]",
+        handlers=[RichHandler(console=Console(stderr=True))])
 
-FILE = sys.argv[1]
-fasta = SeqIO.to_dict(SeqIO.parse(FILE, "fasta"))
+arg_parser = argparse.ArgumentParser(description=desc)
+arg_parser.add_argument('file',
+                        type=str,
+                        help='Path to fasta file to be optimized')
+arg_parser.add_argument('-o',
+                        metavar='outfile',
+                        type=str,
+                        default='optimized.fa',
+                        help='Output file name')
+arg_parser.add_argument('-s', 
+                        metavar="species", 
+                        type=str, 
+                        help="Species codon usage to use ['A_thaliana', 'G_max']", 
+                        default="A_thaliana", 
+                        choices=['A_thaliana', 'G_max'])
+arg_parser.add_argument('--topCodonWeight',
+                        type=int,
+                        default=25,
+                        help='Adjust weight optimizing towards highest frequency codon')
+arg_parser.add_argument('--rareCodonThreshold',
+                        type=float,
+                        default=0.1,
+                        help='Attempt to avoid codons with frequencies below this number')
+arg_parser.add_argument('--rareCodonWeight',
+                        type=int,
+                        default=500,
+                        help='Adjust weight for avoiding rare codons')
+arg_parser.add_argument('--repeatedKmerWeight',
+                        type=int,
+                        default=100,
+                        help='Adjust weight for avoiding repeated kmers')
+arg_parser.add_argument('--repeatedHomopolymerWeight',
+                        type=int,
+                        default=50,
+                        help='Adjust weight for avoiding repeated homopolymers')
+arg_parser.add_argument('--hairpinWeight',
+                        type=int,
+                        default=1000,
+                        help='Adjust weight for avoiding hairpins')
+arg_parser.add_argument('--uniquifyKmersWeight',
+                        type=int,
+                        default=1000,
+                        help='Adjust weight for avoiding kmer repeats of 8 bases and longer')
+arg_parser.add_argument('--rscu',
+                        type=str,
+                        default=None,
+                        help='JSON file containing RSCU values for species')
+arg_parser.add_argument('--rscuGenerate',
+                        type=str,
+                        default=None,
+                        help='Generate rscu values from CDS fasta file')
+
+args = arg_parser.parse_args()
+
+# Load the codon usage table
+if args.s == "G_max":
+    codonUsageFile = "G_max_codonUsage.json"
+else:
+    codonUsageFile = "A_thaliana_codonUsage.json"
+
+scriptDir = os.path.realpath(__file__).replace("codonOptimizeSynthesis.py", "")
+
+logging.info(f"Loading codon usage: {scriptDir}/{args.s}")
+with open(scriptDir + codonUsageFile) as cUF:
+    codonUsageTable = json.load(cUF)
+
+
+# Load the fasta file
+logging.info(f"Loading sequences from '{args.file}'")
+fasta = SeqIO.to_dict(SeqIO.parse(args.file, "fasta"))
+
+# Load RSCU file
+if args.rscuGenerate != None:
+    rscu_dict = calculateRSCU(args.rscuGenerate)
+elif args.rscu != None:
+    logging.info(f"Loading RSCU values from '{args.rscu}'")
+    with open(args.rscu) as rscu:
+        rscu_dict = json.load(rscu)
+
+# Optimization objectives
+problem_objectives = [
+    CodonOptimize(codon_usage_table=codonUsageTable, method="use_best_codon", boost=args.topCodonWeight),
+    AvoidRareCodons(args.rareCodonThreshold, codon_usage_table=codonUsageTable, boost=200),
+    AvoidPattern(RepeatedKmerPattern(3, 3), boost=args.repeatedKmerWeight),
+    AvoidPattern(RepeatedKmerPattern(2, 8), boost=args.repeatedKmerWeight),
+    AvoidPattern(RepeatedKmerPattern(2, 9), boost=args.repeatedKmerWeight),
+    AvoidPattern(RepeatedKmerPattern(2, 10), boost=args.repeatedKmerWeight),
+    AvoidPattern(RepeatedKmerPattern(2, 11), boost=args.repeatedKmerWeight),
+    AvoidPattern(RepeatedKmerPattern(2, 12), boost=args.repeatedKmerWeight),
+    AvoidPattern(RepeatedKmerPattern(2, 13), boost=args.repeatedKmerWeight),
+    AvoidPattern(RepeatedKmerPattern(2, 14), boost=args.repeatedKmerWeight),
+    AvoidPattern(RepeatedKmerPattern(2, 15), boost=args.repeatedKmerWeight),
+    AvoidPattern(HomopolymerPattern("A", 6), boost=args.repeatedHomopolymerWeight),
+    AvoidPattern(HomopolymerPattern("T", 6), boost=args.repeatedHomopolymerWeight),
+    AvoidPattern(HomopolymerPattern("G", 6), boost=args.repeatedHomopolymerWeight),
+    AvoidPattern(HomopolymerPattern("C", 6), boost=args.repeatedHomopolymerWeight),
+    AvoidPattern(HomopolymerPattern("A", 5), boost=args.repeatedHomopolymerWeight),
+    AvoidPattern(HomopolymerPattern("T", 5), boost=args.repeatedHomopolymerWeight),
+    AvoidPattern(HomopolymerPattern("G", 5), boost=args.repeatedHomopolymerWeight),
+    AvoidPattern(HomopolymerPattern("C", 5), boost=args.repeatedHomopolymerWeight),
+    AvoidHairpins(stem_size=9, boost=args.hairpinWeight),
+    AvoidHairpins(stem_size=10, boost=args.hairpinWeight),
+    AvoidHairpins(stem_size=11, boost=args.hairpinWeight),
+    AvoidHairpins(stem_size=12, boost=args.hairpinWeight),
+    UniquifyAllKmers(8, boost=args.uniquifyKmersWeight)
+]
+
+# Optimize each entry in the fasta file
 optimized_records = []
-
 for i in range(0,len(fasta.keys())):
     record = fasta[list(fasta)[i]]
-    print("--------------  %s --------------" % (record.id))
-    # DEFINE THE OPTIMIZATION PROBLEM
+    logging.info(f"Optimizing {record.id}")
+
     problem = DnaOptimizationProblem(
         sequence=str(record.seq),
-        constraints=[
-            AvoidPattern(SequencePattern("TGGATTTCCTTTC"), boost = 100), # These are hairpin sequences
-            AvoidPattern(SequencePattern("CTTCACCACACA"), boost = 100),
-            AvoidPattern(SequencePattern("AAGAGAAAGAAG"), boost = 100),
-            AvoidPattern(SequencePattern("CAACCAAATCAC"), boost = 100),
-            AvoidPattern(SequencePattern("AGAACATCAAG"), boost = 100),
-            AvoidPattern(SequencePattern("ATTTGGAGGTT"), boost = 100),
-            AvoidPattern(SequencePattern("AGGAAGAAGTT"), boost = 100),
-            AvoidPattern(SequencePattern("CTAAGAAGTTC"), boost = 100),
-            AvoidPattern(SequencePattern("TTTCTCATCAG"), boost = 100),
-            AvoidPattern(SequencePattern("ACAAATCTCCT"), boost = 100),
-            AvoidPattern(SequencePattern("AAGATGGTTCA"), boost = 100),
-            EnforceTranslation()
-            ],
-        objectives=[
-            CodonOptimize(codon_usage_table=AT_CodonUsage, method="use_best_codon"),
-            AvoidRareCodons(0.2, codon_usage_table=AT_CodonUsage, boost=750),
-            AvoidPattern(RepeatedKmerPattern(3, 3), boost=50),
-            AvoidPattern(RepeatedKmerPattern(2, 8), boost=100),
-            AvoidPattern(RepeatedKmerPattern(2, 9), boost=100),
-            AvoidPattern(RepeatedKmerPattern(2, 10), boost=100),
-            AvoidPattern(RepeatedKmerPattern(2, 11), boost=100),
-            AvoidPattern(RepeatedKmerPattern(2, 12), boost=100),
-            AvoidPattern(RepeatedKmerPattern(2, 13), boost=100),
-            AvoidPattern(RepeatedKmerPattern(2, 14), boost=100),
-            AvoidPattern(RepeatedKmerPattern(2, 15), boost=100),
-            AvoidPattern(HomopolymerPattern("A", 6), boost=50),
-            AvoidPattern(HomopolymerPattern("T", 6), boost=50),
-            AvoidPattern(HomopolymerPattern("G", 6), boost=50),
-            AvoidPattern(HomopolymerPattern("C", 6), boost=50),
-            AvoidPattern(HomopolymerPattern("A", 5), boost=50),
-            AvoidPattern(HomopolymerPattern("T", 5), boost=50),
-            AvoidPattern(HomopolymerPattern("G", 5), boost=50),
-            AvoidPattern(HomopolymerPattern("C", 5), boost=50),
-            AvoidPattern(HomopolymerPattern("A", 4), boost=50),
-            AvoidPattern(HomopolymerPattern("T", 4), boost=50),
-            AvoidPattern(HomopolymerPattern("G", 4), boost=50),
-            AvoidPattern(HomopolymerPattern("C", 4), boost=50),
-            AvoidHairpins(stem_size=9, boost=1000),
-            AvoidHairpins(stem_size=10, boost=1000),
-            AvoidHairpins(stem_size=11, boost=1000),
-            AvoidHairpins(stem_size=12, boost=1000),
-            UniquifyAllKmers(9, boost=200), # This is the best constraint for removing repetitive elements for IDT gene synthesis
-            UniquifyAllKmers(12, boost=200)
-            ]
-    )
+        constraints=[EnforceTranslation()],
+        objectives=problem_objectives)
+
     try:
         # SOLVE THE CONSTRAINTS, OPTIMIZE WITH RESPECT TO THE OBJECTIVE
         problem.max_random_iters = 20000
-        problem.resolve_constraints()
         problem.optimize()
+        problem.resolve_constraints(final_check=True)
 
         # PRINT SUMMARIES TO CHECK THAT CONSTRAINTS PASS
-        print(problem.constraints_text_summary())
         print(problem.objectives_text_summary())
+        print(problem.constraints_text_summary())
 
         # GET THE FINAL SEQUENCE (AS STRING OR ANNOTATED BIOPYTHON RECORDS)
-        final_sequence = problem.sequence  # string
         final_record = problem.to_record(with_sequence_edits=True)
         final_record.id = record.id
         final_record.description = ""
 
+        print(str(final_record.seq))
+
+        # Check RCSU values
+        print(f"Original sequence CAI: {calculateCAI(record, rscu_dict)}")
+        print(f"Optimized sequence CAI: {calculateCAI(final_record, rscu_dict)}")
+
         optimized_records.append(final_record)
     except:
-        print("No solution found!")
+        logging.error("No solution found!")
 
-SeqIO.write(optimized_records, "optimizedSynthesis.fa", "fasta")
+SeqIO.write(optimized_records, args.o, "fasta")
 
-
-
-
+logging.info(f"Done! Optimized sequences written to {args.o}")
