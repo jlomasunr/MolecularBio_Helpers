@@ -84,9 +84,9 @@ args = arg_parser.parse_args()
 
 # Load the codon usage table
 if args.s == "G_max":
-    codonUsageFile = "G_max_codonUsage.json"
+    codonUsageFile = "data/G_max_codonUsage.json"
 else:
-    codonUsageFile = "A_thaliana_codonUsage.json"
+    codonUsageFile = "data/A_thaliana_codonUsage.json"
 
 scriptDir = os.path.realpath(__file__).replace("codonOptimizeSynthesis.py", "")
 
