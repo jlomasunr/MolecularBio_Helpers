@@ -15,12 +15,12 @@ A stringent local alignment of the query and reference plasmid is used to re-ind
 If the reference is provided in GenBank format, features are extracted and locally aligned to the re-indexed query. The bounds of the local alignments on the query are taken as the new coordinates of the annotation.
 ## Environemnt
 ```
-conda install -c bioconda biopython
+mamba install -c bioconda -c conda-forge parasail-python dnachisel biopython
 ```
 
 ## Usage
 ```
-ComPlasmid.py [-h] [--transfer] subject_file query_file
+ComPlasmid.py [-h] [options] subject_file query_file
 
 positional arguments:
   subject_file  Subject file (fasta or genbank)
@@ -29,6 +29,7 @@ positional arguments:
 options:
   -h, --help    show this help message and exit
   --transfer    Map subject features to query file
+  --strand      [forward|reverse] Only search one strand for local alignments
 ```
 
 ***Input:***
