@@ -110,7 +110,7 @@ report["Re-indexing"] = {
 	}
 
 # Map subject features to query via local alignments
-# TODO: parallelize https://superfastpython.com/multiprocessing-pool-for-loop/
+# TODO: identical features are mapping to the same location and need to be guided by the reference...
 print("Transferring features...")
 report["Features Transferred"] = {}
 if args.transfer & (subject_format == "genbank"):
