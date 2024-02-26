@@ -99,8 +99,8 @@ else:
 		del query_f
 
 # Update query indices to sync the locally aligned region (helps with global alignments for comparison)
-dif = int(loc_alg.len_query) - int(loc_alg.end_query)
-query.seq = query.seq[loc_alg.end_query:] + query.seq[0:loc_alg.end_query]
+dif = int(loc_alg.end_query) - int(loc_alg.length)
+query.seq = query.seq[dif:] + query.seq[0:dif]
 query.features = [feat._shift(dif) for feat in query.features]
 
 report["Re-indexing"] = {
